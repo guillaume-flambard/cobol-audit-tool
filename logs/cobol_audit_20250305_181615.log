@@ -1,0 +1,6 @@
+2025-03-05 18:16:15,100 - cobol_audit - INFO - Début de l'audit du fichier: tests/fixtures/sample.cbl
+2025-03-05 18:16:15,103 - cobol_audit - INFO - Début de l'analyse du fichier: tests/fixtures/sample.cbl
+2025-03-05 18:16:15,103 - cobol_audit - INFO - Application des règles d'analyse avancées
+2025-03-05 18:16:15,103 - cobol_audit - INFO - Métriques calculées: {'total_lines': 31, 'procedures': 4, 'data_items': 5, 'complexity': 8, 'unused_vars': 0, 'empty_sections': 0, 'nested_conditions': 1, 'magic_numbers': 2, 'dead_code_sections': 1}
+2025-03-05 18:16:15,103 - cobol_audit - INFO - Analyse terminée. 5 problèmes détectés.
+2025-03-05 18:16:15,114 - cobol_audit - INFO - Audit terminé avec succès

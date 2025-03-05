@@ -2,12 +2,16 @@
 Module d'analyse pour détecter les problèmes dans le code COBOL.
 """
 from typing import List, Dict, Any, Set
-from cobol_parser import CobolParser
 import re
+from cobol_parser import CobolParser
+from rules import CobolRules
+from exceptions import AnalysisError, ParseError
+from logger import logger
 
 class CobolAnalyzer:
     def __init__(self):
         self.parser = CobolParser()
+        self.rules = CobolRules()
         self.issues = []
         self.metrics = {
             'total_lines': 0,
@@ -15,29 +19,110 @@ class CobolAnalyzer:
             'data_items': 0,
             'complexity': 0,
             'unused_vars': 0,
-            'empty_sections': 0
+            'empty_sections': 0,
+            'nested_conditions': 0,
+            'magic_numbers': 0,
+            'dead_code_sections': 0
         }
 
     def analyze_file(self, file_path: str) -> Dict[str, Any]:
         """Analyse un fichier COBOL et retourne les résultats."""
         try:
+            logger.info(f"Début de l'analyse du fichier: {file_path}")
             divisions = self.parser.parse_file(file_path)
             self._analyze_divisions(divisions)
             self._calculate_metrics(divisions)
+            
+            logger.info(f"Analyse terminée. {len(self.issues)} problèmes détectés.")
             return {
                 'issues': self.issues,
                 'metrics': self.metrics
             }
         except Exception as e:
-            raise RuntimeError(f"Erreur lors de l'analyse: {str(e)}")
+            logger.error(f"Erreur lors de l'analyse: {str(e)}")
+            raise AnalysisError(f"Erreur lors de l'analyse: {str(e)}")
 
     def _analyze_divisions(self, divisions: Dict[str, List[str]]) -> None:
         """Analyse chaque division pour détecter les problèmes."""
-        self._check_division_structure(divisions)
-        self._analyze_procedure_division(divisions['PROCEDURE'])
-        self._analyze_data_division(divisions['DATA'])
-        self._analyze_unused_variables(divisions)
-        self._analyze_empty_sections(divisions['PROCEDURE'])
+        try:
+            self._check_division_structure(divisions)
+            self._analyze_procedure_division(divisions['PROCEDURE'])
+            self._analyze_data_division(divisions['DATA'])
+            self._analyze_advanced_rules(divisions)
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse des divisions: {str(e)}")
+            raise AnalysisError(f"Erreur lors de l'analyse des divisions: {str(e)}")
+
+    def _analyze_advanced_rules(self, divisions: Dict[str, List[str]]) -> None:
+        """Applique les règles d'analyse avancées."""
+        logger.info("Application des règles d'analyse avancées")
+        
+        # Analyse du code mort
+        dead_sections = self.rules.check_dead_code(divisions['PROCEDURE'])
+        self.metrics['dead_code_sections'] = len(dead_sections)
+        for section in dead_sections:
+            self.issues.append({
+                'severity': 'WARNING',
+                'message': f'Section potentiellement morte détectée: {section}',
+                'type': 'dead_code',
+                'line': section
+            })
+
+        # Vérification des nombres magiques
+        magic_numbers = 0
+        for line in divisions['PROCEDURE']:
+            if self.rules.check_magic_numbers(line):
+                magic_numbers += 1
+                self.issues.append({
+                    'severity': 'INFO',
+                    'message': 'Nombre magique détecté',
+                    'type': 'magic_number',
+                    'line': line
+                })
+        self.metrics['magic_numbers'] = magic_numbers
+
+        # Vérification des conditions imbriquées
+        max_nested = 0
+        for line in divisions['PROCEDURE']:
+            nested_count = self.rules.check_nested_conditions(line)
+            max_nested = max(max_nested, nested_count)
+            if nested_count > 2:
+                self.issues.append({
+                    'severity': 'WARNING',
+                    'message': f'Conditions trop imbriquées ({nested_count} niveaux)',
+                    'type': 'complexity',
+                    'line': line
+                })
+        self.metrics['nested_conditions'] = max_nested
+
+        # Vérification de l'organisation WORKING-STORAGE
+        storage_issues = self.rules.check_working_storage_organization(divisions['DATA'])
+        for issue in storage_issues:
+            self.issues.append({
+                'severity': 'WARNING',
+                'message': issue,
+                'type': 'data_organization'
+            })
+
+        # Vérification des PERFORM THRU
+        for line in divisions['PROCEDURE']:
+            if self.rules.check_perform_thru(line):
+                self.issues.append({
+                    'severity': 'WARNING',
+                    'message': 'Utilisation de PERFORM THRU déconseillée',
+                    'type': 'best_practice',
+                    'line': line
+                })
+
+        # Vérification des ALTER GOTO
+        altered_gotos = self.rules.check_altered_goto(divisions['PROCEDURE'])
+        for goto in altered_gotos:
+            self.issues.append({
+                'severity': 'ERROR',
+                'message': 'Utilisation de ALTER GOTO détectée',
+                'type': 'best_practice',
+                'line': goto
+            })
 
     def _check_division_structure(self, divisions: Dict[str, List[str]]) -> None:
         """Vérifie la structure des divisions."""
@@ -72,85 +157,25 @@ class CobolAnalyzer:
                     'line': line
                 })
 
-    def _analyze_unused_variables(self, divisions: Dict[str, List[str]]) -> None:
-        """Détecte les variables déclarées mais non utilisées."""
-        # Collecte toutes les variables déclarées
-        declared_vars = set()
-        for line in divisions['DATA']:
-            if match := re.match(r'^\s*\d+\s+(\w+)', line):
-                var_name = match.group(1)
-                if var_name != 'FILLER':
-                    declared_vars.add(var_name)
-
-        # Vérifie l'utilisation dans la PROCEDURE DIVISION
-        used_vars = set()
-        for line in divisions['PROCEDURE']:
-            for var in declared_vars:
-                if var in line and not line.endswith('SECTION.'):
-                    used_vars.add(var)
-
-        # Ajoute les problèmes pour les variables non utilisées
-        unused_vars = declared_vars - used_vars
-        self.metrics['unused_vars'] = len(unused_vars)
-        for var in unused_vars:
-            self.issues.append({
-                'severity': 'WARNING',
-                'message': f'Variable {var} déclarée mais non utilisée',
-                'type': 'unused_variable'
-            })
-
-    def _analyze_empty_sections(self, procedures: List[str]) -> None:
-        """Détecte les sections vides ou ne contenant que EXIT."""
-        current_section = None
-        section_content = []
-        
-        for line in procedures:
-            if 'SECTION.' in line:
-                if current_section and section_content:
-                    self._check_section_content(current_section, section_content)
-                current_section = line
-                section_content = []
-            elif current_section:
-                section_content.append(line)
-
-        # Vérifie la dernière section
-        if current_section and section_content:
-            self._check_section_content(current_section, section_content)
-
-    def _check_section_content(self, section_name: str, content: List[str]) -> None:
-        """Vérifie si une section est vide ou ne contient que EXIT."""
-        meaningful_content = [
-            line for line in content 
-            if line.strip() and not line.strip().upper() in ['EXIT.', 'EXIT']
-        ]
-        
-        if not meaningful_content:
-            self.metrics['empty_sections'] += 1
-            self.issues.append({
-                'severity': 'INFO',
-                'message': f'Section vide ou ne contenant que EXIT: {section_name}',
-                'type': 'empty_section',
-                'line': section_name
-            })
-
     def _calculate_metrics(self, divisions: Dict[str, List[str]]) -> None:
         """Calcule les métriques du code."""
-        self.metrics['total_lines'] = sum(len(div) for div in divisions.values())
-        self.metrics['procedures'] = len(self.parser.get_procedures())
-        self.metrics['data_items'] = len(self.parser.get_data_items())
-        self.metrics['complexity'] = self._calculate_complexity(divisions['PROCEDURE'])
+        try:
+            self.metrics['total_lines'] = sum(len(div) for div in divisions.values())
+            self.metrics['procedures'] = len(self.parser.get_procedures())
+            self.metrics['data_items'] = len(self.parser.get_data_items())
+            self.metrics['complexity'] = self._calculate_complexity(divisions['PROCEDURE'])
+            
+            # Analyse de l'utilisation des données
+            data_usage = self.rules.check_data_usage(divisions['DATA'], divisions['PROCEDURE'])
+            self.metrics['unused_vars'] = len([v for v, count in data_usage.items() if count == 0])
+            
+            logger.info(f"Métriques calculées: {self.metrics}")
+        except Exception as e:
+            logger.error(f"Erreur lors du calcul des métriques: {str(e)}")
+            raise AnalysisError(f"Erreur lors du calcul des métriques: {str(e)}")
 
     def _calculate_complexity(self, procedures: List[str]) -> int:
-        """Calcule la complexité cyclomatique du code COBOL.
-        
-        La complexité est calculée en comptant:
-        - Les conditions IF/EVALUATE
-        - Les boucles PERFORM UNTIL/VARYING
-        - Les instructions GOTO
-        - Les sections
-        
-        La formule est: 1 + nombre de points de décision
-        """
+        """Calcule la complexité cyclomatique du code COBOL."""
         complexity = 1  # Valeur de base
         
         for line in procedures:
