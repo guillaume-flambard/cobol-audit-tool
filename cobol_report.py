@@ -14,21 +14,43 @@ class CobolReport:
 Date: {date}
 Fichier analysé: {file_path}
 
-## Résumé
+## Vue d'Ensemble
 
-{summary}
+Ce rapport présente une analyse détaillée du code COBOL, identifiant les problèmes potentiels
+et fournissant des recommandations pour améliorer la qualité du code.
 
-## Métriques
+## Métriques de Code
 
-{metrics}
+- **Structure du Programme**
+  - Lignes totales: {metrics[total_lines]}
+  - Procédures: {metrics[procedures]}
+  - Éléments de données: {metrics[data_items]}
 
-## Problèmes Détectés
+- **Qualité du Code**
+  - Complexité cyclomatique: {metrics[complexity]}
+  - Variables non utilisées: {metrics[unused_vars]}
+  - Sections vides: {metrics[empty_sections]}
+
+- **Problèmes Détectés**
+  - Erreurs: {error_count}
+  - Avertissements: {warning_count}
+  - Informations: {info_count}
+
+## Détails des Problèmes
 
 {issues}
 
 ## Recommandations
 
 {recommendations}
+
+## Bonnes Pratiques COBOL
+
+- Éviter l'utilisation de GOTO au profit de structures de contrôle modernes
+- Documenter clairement l'utilisation des FILLER
+- Supprimer les variables non utilisées
+- Fusionner ou supprimer les sections vides
+- Maintenir une complexité cyclomatique raisonnable (< 10 par section)
 """
 
     def generate(self, analysis_results: Dict[str, Any], file_path: str, output_format: str = 'markdown') -> str:
@@ -47,47 +69,21 @@ Fichier analysé: {file_path}
         metrics = results['metrics']
         issues = results['issues']
 
-        summary = self._generate_summary(metrics, issues)
-        metrics_section = self._format_metrics(metrics)
-        issues_section = self._format_issues(issues)
-        recommendations = self._generate_recommendations(issues)
+        # Compte les problèmes par sévérité
+        severity_count = {'ERROR': 0, 'WARNING': 0, 'INFO': 0}
+        for issue in issues:
+            severity_count[issue['severity']] += 1
 
         return self.template.format(
             date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             file_path=file_path,
-            summary=summary,
-            metrics=metrics_section,
-            issues=issues_section,
-            recommendations=recommendations
+            metrics=metrics,
+            error_count=severity_count['ERROR'],
+            warning_count=severity_count['WARNING'],
+            info_count=severity_count['INFO'],
+            issues=self._format_issues(issues),
+            recommendations=self._generate_recommendations(issues)
         )
-
-    def _generate_summary(self, metrics: Dict[str, int], issues: list) -> str:
-        """Génère le résumé du rapport."""
-        severity_count = {
-            'ERROR': 0,
-            'WARNING': 0,
-            'INFO': 0
-        }
-        for issue in issues:
-            severity_count[issue['severity']] += 1
-
-        return f"""
-- Lignes totales: {metrics['total_lines']}
-- Procédures: {metrics['procedures']}
-- Éléments de données: {metrics['data_items']}
-- Complexité: {metrics['complexity']}
-- Problèmes détectés:
-  - Erreurs: {severity_count['ERROR']}
-  - Avertissements: {severity_count['WARNING']}
-  - Informations: {severity_count['INFO']}
-"""
-
-    def _format_metrics(self, metrics: Dict[str, int]) -> str:
-        """Formate la section des métriques."""
-        return "\n".join([
-            f"- **{key}**: {value}"
-            for key, value in metrics.items()
-        ])
 
     def _format_issues(self, issues: list) -> str:
         """Formate la section des problèmes."""
@@ -106,6 +102,7 @@ Fichier analysé: {file_path}
     def _generate_recommendations(self, issues: list) -> str:
         """Génère des recommandations basées sur les problèmes détectés."""
         recommendations = set()
+        
         for issue in issues:
             if issue['type'] == 'best_practice':
                 recommendations.add("- Éviter l'utilisation de GOTO pour améliorer la lisibilité")
@@ -113,6 +110,10 @@ Fichier analysé: {file_path}
                 recommendations.add("- Améliorer la documentation des éléments FILLER")
             elif issue['type'] == 'structure':
                 recommendations.add("- Vérifier la structure des divisions COBOL")
+            elif issue['type'] == 'unused_variable':
+                recommendations.add("- Supprimer ou utiliser les variables déclarées")
+            elif issue['type'] == 'empty_section':
+                recommendations.add("- Fusionner ou supprimer les sections vides")
 
         return "\n".join(recommendations) if recommendations else "Aucune recommandation spécifique."
 
